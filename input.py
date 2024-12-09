@@ -22,8 +22,31 @@ def parse_cmd_line() -> tuple(str, bool):
         default=False,
         required=False,
     )
+
+    parser.add_argument(
+        "-t",
+        "--traverse",
+        help="whether to traverse the graph",
+        action="store_true",
+        dest="traverse_graph",
+        default=False,
+        required=False,
+    )
+    parser.add_argument(
+        "-s",
+        "--save",
+        help="save path in result.txt",
+        action="store_true",
+        dest="save",
+        default=False,
+        required=False,
+    )
+
     args = parser.parse_args()
-    return args.in_file, args.plot_graph
+    return (args.in_file,
+            args.plot_graph,
+            args.traverse_graph,
+            args.save)
 
 
 def parse_file(file_name: str) -> tuple[list[tuple], list[tuple]]:
