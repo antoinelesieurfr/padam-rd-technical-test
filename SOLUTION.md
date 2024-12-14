@@ -2,11 +2,12 @@
 
 The computed algorithm is a greedy nearest neighbors approach, it proceeds as follow:
 - check if the graph is connected, if not return -1
-- start with the edge of index 0
-- go to one vertex of the edge
-- check the neighboring vertices of the current vertex:
-- if vertices have not been visited yet, go to the vertex whose edge has minimum weight
-- if all vertices have been visited, expand the neighborhood to the neighbors of the neighbors and so on until you find an unvisited edge, store the path, add the weights and go to the corresponding vertex
-- repeat the procedure until we cross all the edges
-We used a DataFrame to index the edges, the result is the indices of the edges DataFrame in the order they have been visited, possibly several times.
+- set the current vertex as the vertex of index 0
+- while all the edges haven't been visited:
+- generate a subgraph of the k nearest neighbours of the current vertex, start with k = 1, if all the edges of the subgraph have been visited, increment k of 1.
+- if the subgraph contains unvisited edges:
+- find the closest edges to the current vertex
+- generate a new path which goes to the closest edge and visits it
+- set the current vertex as the one at the end of the path
+- actualize the distance, the path and the list of visited edges
 
