@@ -23,6 +23,7 @@ class Graph:
         self.edges = edges
         self.edges_df = pd.DataFrame(self.edges,
                                      columns = ['id1', 'id2', 'weight', 'coord1', 'coord2'])
+        self.G = self.build_Graph()
         self.edges_path = []
         self.visited_edges = []
 
@@ -41,90 +42,92 @@ class Graph:
         plt.title(f"#E={len(self.edges)}, #V={len(self.vertices)}")
         plt.show()
 
-
-    def get_nbs_edges(self, vertex_id) -> list[tuple]:
-        """
-        returns a DataFrame listing vertices indexes connected to the vertex of index vertex_id
-        by one edge and their weight
-        """
-        df_index1 = self.edges_df[self.edges_df.id1 == vertex_id]
-        df_index2 = self.edges_df[self.edges_df.id2 == vertex_id]
-        tuple_list1 = df_index1[['id2','weight']].to_records(index=True).tolist()
-        tuple_list2 = df_index2[['id1','weight']].to_records(index=True).tolist()
-        return pd.DataFrame(tuple_list1 + tuple_list2,
-                            columns = ['index_edge', 'nbs', 'weight'])
-    
-    def is_connected(self) -> bool:
+    def build_Graph(self):
         G=nx.Graph()
         G.add_nodes_from(range(len(self.vertices)))
-        edge_list1 = self.edges_df[['id1','id2']].to_records(index=False).tolist()
-        edge_list2 = self.edges_df[['id2','id1']].to_records(index=False).tolist() #graph is undirected
-        G.add_edges_from(edge_list1)
-        G.add_edges_from(edge_list2)
-        return nx.is_connected(G)
-
-
+        edge_list = self.edges_df[['id1','id2', 'weight']].to_records(index=False).tolist()
+        G.add_weighted_edges_from(edge_list)
+        return G    
+        
     def visit_graph(self) -> float:
         """
-        return the list of edges in the order the algorithm visited them 
-        and a total distance traveled
+        set the list of visited_edges in the order the algorithm visited them,
+        the path which visits all the edges and returns the total distance traveled
         """
-        if self.is_connected() == False:
-            print("no eulerian path, the graph is not connected")
+        if nx.is_connected(self.G) == False:
+            print("no pseudo-eulerian path, the graph is not connected")
             return -1
         else:
-            edges_path = [0] # we start at edge 0
-            self.visited_edges = [0]
-            current_vertex = self.edges_df.iloc[0].id2 # the first vertex is connected to the first edge
-            traveled_distance = self.edges_df.iloc[0].weight
-            while len(self.visited_edges) < len(self.edges):
-                nbs_df = self.get_nbs_edges(current_vertex) 
-                unvisited_nbs_edges_df = nbs_df[~nbs_df.index_edge.isin(self.visited_edges)]
-                is_empty = False 
-                if unvisited_nbs_edges_df.empty:
-                    is_empty = True
-                    # If all the edges in the nbs of the vertex have been visited,
-                    # we expand the nbhood to the nbs of the nbs and so on
-                    # until we find an unvisited edge
-                    #create a column to store the intermediate path
-                    nbs_df['inter_edges'] = np.empty((len(nbs_df), 0)).tolist()
-                    while unvisited_nbs_edges_df.empty:
-                        new_nbs_df = nbs_df.copy()
-                        for i in range(len(nbs_df)): #TODO parallelize
-                            # add the nbs of the i-th nb to the nbhood 
-                            extended_nbs = self.get_nbs_edges(nbs_df.iloc[i].nbs)
-                            #update the weights
-                            extended_nbs['weight'] = extended_nbs['weight'] + nbs_df.iloc[i].weight
-                            # store the intermediate edge
-                            extended_nbs['inter_edges'] = pd.Series([nbs_df.iloc[i].inter_edges] * len(extended_nbs))
-                            extended_nbs['inter_edges'] = extended_nbs['inter_edges'].apply(lambda x : x + [nbs_df.iloc[i].index_edge]) #TODO find a more efficient way to expand the list in every cell
-                            #update the new neighborhood dataframe
-                            new_nbs_df = pd.concat([new_nbs_df, extended_nbs]) 
-                        nbs_df = new_nbs_df
-                        #remove duplicates
-                        nbs_df = nbs_df.sort_values('weight', ascending=False).drop_duplicates('nbs') #TODO check if it really picks the smallest value
-                        #print(nbs_df, end = '\r')
-                        unvisited_nbs_edges_df = nbs_df[~nbs_df.index_edge.isin(self.visited_edges)]
-                        #print(unvisited_nbs_edges_df, end='\r')
+            #initialization
+            edges_path = []
+            visited_edges = []
+            current_vertex = 0
+            traveled_distance = 0
+            while len(visited_edges) < len(self.edges):
+                print("%.2f %% done"%(100 * len(visited_edges) / float(len(self.edges))), end ='\r')
+                found_new_edge = False
+                k = 1
+                while found_new_edge == False:
+                    #generate the graph of the k nearest neighbours of the current vertex
+                    sub_graph = nx.ego_graph(self.G, current_vertex, radius = k)
+                    sub_graph_copy = sub_graph.copy()
+                    sub_graph_copy.remove_edges_from(visited_edges)
+                    if nx.is_empty(sub_graph_copy):
+                        #if the subgraph contains only visited edges we look for the k+1
+                        #nearest neighbors
+                        k += 1
+                    else:
+                        found_new_edge = True
+                        new_edges = np.array(sub_graph_copy.edges)
+                        distance = np.inf
+                        #for every unvisited edge, we look for the closest path from the current
+                        #vertex to the edge by the to adjacent vertices 
+                        for i in range(len(new_edges)):
+                            distance_inter_right = nx.shortest_path_length(sub_graph,
+                                                                           source = current_vertex,
+                                                                           weight = 'weight',
+                                                                           target = new_edges[i][0])
+                            distance_inter_left = nx.shortest_path_length(sub_graph,
+                                                                          source = current_vertex,
+                                                                          weight = 'weight',
+                                                                          target = new_edges[i][1])
+                            if distance_inter_left > distance_inter_right:
+                                closest_vertex = new_edges[i][0]
+                                next_vertex = new_edges[i][1]
+                                distance_inter = distance_inter_right
+                            else:
+                                closest_vertex = new_edges[i][1]
+                                next_vertex = new_edges[i][0]
+                                distance_inter = distance_inter_left                            
+                            #when the distance to the edge if the lowest of the for loop
+                            #we select the closest path that visit the edge, store the path
+                            #and the distance and set the next current vertex
+                            if distance_inter < distance:
+                                next_visited_edge = list(new_edges[i])
+                                distance = distance_inter
+                                path_inter = nx.shortest_path(sub_graph,
+                                                              source = current_vertex,
+                                                              weight = 'weight',
+                                                              target = closest_vertex)
+                                path_inter = path_inter + [next_vertex]
+                                final_distance = distance_inter + \
+                                    self.G[closest_vertex][next_vertex]['weight']
+                                next_chosen_vertex = next_vertex
 
-                #find the nearset_nbs
-                nearest_nbs_edges_df = unvisited_nbs_edges_df[unvisited_nbs_edges_df.weight == unvisited_nbs_edges_df.weight.min()]
-                #select the first of the nearest nb in the list
-                selected_nb = nearest_nbs_edges_df.iloc[0]
-                self.visited_edges = self.visited_edges + [selected_nb.index_edge]
-                print(len(self.visited_edges)/float(len(self.edges)), end='\r')
-                if is_empty:
-                    edges_path = edges_path + selected_nb.inter_edges + [selected_nb.index_edge]
-                else:
-                    edges_path = edges_path + [selected_nb.index_edge]
-                current_vertex = selected_nb.nbs
-                traveled_distance = traveled_distance + selected_nb.weight
+                        path_inter_list = [(path_inter[x],\
+                                            path_inter[x + 1]) \
+                                           for x in range(len(path_inter) - 1)]
+                        #actualization of the edges path, the distance and the current vertex
+                        edges_path += path_inter_list
+                        visited_edges.append(next_visited_edge)
+                        current_vertex = next_chosen_vertex
+                        traveled_distance += final_distance
             self.edges_path = edges_path
-            print("traveled distance is %s"%traveled_distance)
+            self.visited_edges = visited_edges
             return traveled_distance
-
-    def save_path(self):
-        with open("result.txt", "w") as output:
+                        
+    def save_path(self, file_name):
+        with open(file_name, "w") as output:
             output.write(str(self.edges_path))
 
         
