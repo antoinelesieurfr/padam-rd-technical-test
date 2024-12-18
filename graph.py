@@ -4,6 +4,7 @@ from matplotlib.collections import LineCollection
 import pandas as pd
 import networkx as nx
 import numpy as np
+import time
 
 # nb will stand for neighbor in the code
 
@@ -43,9 +44,9 @@ class Graph:
         plt.show()
 
     def build_Graph(self):
-        G=nx.Graph()
+        G = nx.Graph()
         G.add_nodes_from(range(len(self.vertices)))
-        edge_list = self.edges_df[['id1','id2', 'weight']].to_records(index=False).tolist()
+        edge_list = self.edges_df[['id1','id2', 'weight']].to_records(index = False).tolist()
         G.add_weighted_edges_from(edge_list)
         return G    
         
@@ -59,73 +60,76 @@ class Graph:
             return -1
         else:
             #initialization
-            edges_path = []
-            visited_edges = []
-            current_vertex = 0
+            edges_path        = []
+            visited_edges     = []
+            adjacent_vertices = set(self.G.nodes)
+            current_vertex    = 0
             traveled_distance = 0
+            pruned_graph      = self.G.copy()
+           
             while len(visited_edges) < len(self.edges):
-                print("%.2f %% done"%(100 * len(visited_edges) / float(len(self.edges))), end ='\r')
+                print("%.2f %% done"%(100 * len(visited_edges) / float(len(self.edges))),
+                      end ='\r')
+                    
+                isolated_nodes    = set(nx.isolates(pruned_graph))
+                adjacent_vertices = adjacent_vertices - isolated_nodes
+
+                #initiate the loop
                 found_new_edge = False
-                k = 1
+                k              = 0
                 while found_new_edge == False:
-                    #generate the graph of the k nearest neighbours of the current vertex
-                    sub_graph = nx.ego_graph(self.G, current_vertex, radius = k)
-                    sub_graph_copy = sub_graph.copy()
-                    sub_graph_copy.remove_edges_from(visited_edges)
-                    if nx.is_empty(sub_graph_copy):
-                        #if the subgraph contains only visited edges we look for the k+1
-                        #nearest neighbors
+                    #looks if there is an adjacent vertex at distance k of the current vertex
+                    (dijkstra_distances,
+                     dijkstra_paths) = nx.single_source_dijkstra(self.G,
+                                                                 source = current_vertex,
+                                                                 cutoff = k,
+                                                                 weight = 'weight')
+                    NN_vertices       = set(dijkstra_distances.keys())
+                    newfound_vertices = adjacent_vertices & NN_vertices
+
+                    # if there is no adjacent vertex k is incremented
+                    if not newfound_vertices:
                         k += 1
                     else:
+                        #else we compute the distance to the unvisited vertices of distance k
+                        #to the current vertex and choose the first on the list of the closest
+                        #vertices
                         found_new_edge = True
-                        new_edges = np.array(sub_graph_copy.edges)
-                        distance = np.inf
-                        #for every unvisited edge, we look for the closest path from the current
-                        #vertex to the edge by the to adjacent vertices 
-                        for i in range(len(new_edges)):
-                            distance_inter_right = nx.shortest_path_length(sub_graph,
-                                                                           source = current_vertex,
-                                                                           weight = 'weight',
-                                                                           target = new_edges[i][0])
-                            distance_inter_left = nx.shortest_path_length(sub_graph,
-                                                                          source = current_vertex,
-                                                                          weight = 'weight',
-                                                                          target = new_edges[i][1])
-                            if distance_inter_left > distance_inter_right:
-                                closest_vertex = new_edges[i][0]
-                                next_vertex = new_edges[i][1]
-                                distance_inter = distance_inter_right
-                            else:
-                                closest_vertex = new_edges[i][1]
-                                next_vertex = new_edges[i][0]
-                                distance_inter = distance_inter_left                            
-                            #when the distance to the edge if the lowest of the for loop
-                            #we select the closest path that visit the edge, store the path
-                            #and the distance and set the next current vertex
-                            if distance_inter < distance:
-                                next_visited_edge = list(new_edges[i])
-                                distance = distance_inter
-                                path_inter = nx.shortest_path(sub_graph,
-                                                              source = current_vertex,
-                                                              weight = 'weight',
-                                                              target = closest_vertex)
-                                path_inter = path_inter + [next_vertex]
-                                final_distance = distance_inter + \
-                                    self.G[closest_vertex][next_vertex]['weight']
-                                next_chosen_vertex = next_vertex
+                        newfound_dijkstra_distances = {x : dijkstra_distances[x] \
+                                                         for x in newfound_vertices}
+                        closest_vertex = min(newfound_dijkstra_distances,
+                                             key = newfound_dijkstra_distances.get)
 
-                        path_inter_list = [(path_inter[x],\
-                                            path_inter[x + 1]) \
-                                           for x in range(len(path_inter) - 1)]
-                        #actualization of the edges path, the distance and the current vertex
-                        edges_path += path_inter_list
-                        visited_edges.append(next_visited_edge)
-                        current_vertex = next_chosen_vertex
-                        traveled_distance += final_distance
-            self.edges_path = edges_path
+                        #we go to the closest adjacent vertex and visit the first
+                        #edge on its edges list
+                        new_edge = list(pruned_graph.edges(closest_vertex))[0]
+
+                        #actualization
+                        next_vertex = list(new_edge)
+                        next_vertex.remove(closest_vertex)
+                        next_vertex = next_vertex[0]
+                        
+                        distance = dijkstra_distances[closest_vertex] + \
+                            self.G[closest_vertex][next_vertex]['weight']
+                        traveled_distance += distance
+                        
+                        path = dijkstra_paths[closest_vertex] + \
+                            [next_vertex]
+                        path_edges_list = [(path[x],
+                                            path[x + 1]) \
+                                           for x in range(len(path) - 1)]
+                        edges_path += path_edges_list
+                        
+                        visited_edges.append(new_edge)
+                        #actualize the list of adjacent vertices
+                        #(with at least one unvisited edge)
+                        pruned_graph.remove_edge(*new_edge)
+                        current_vertex = next_vertex
+            #save the selected values
+            self.edges_path    = edges_path
             self.visited_edges = visited_edges
             return traveled_distance
-                        
+                      
     def save_path(self, file_name):
         with open(file_name, "w") as output:
             output.write(str(self.edges_path))
