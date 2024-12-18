@@ -66,12 +66,12 @@ class Graph:
             current_vertex    = 0
             traveled_distance = 0
             pruned_graph      = self.G.copy()
-           
             while len(visited_edges) < len(self.edges):
                 print("%.2f %% done"%(100 * len(visited_edges) / float(len(self.edges))),
                       end ='\r')
                     
                 isolated_nodes    = set(nx.isolates(pruned_graph))
+                pruned_graph.remove_nodes_from(isolated_nodes)
                 adjacent_vertices = adjacent_vertices - isolated_nodes
 
                 #initiate the loop
